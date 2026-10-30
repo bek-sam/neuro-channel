@@ -1,0 +1,20 @@
+keys/
+audio/
+images/
+clips/
+output/
+# secrets
+*.env
+client_secret*.json
+yt_token.json
+# generated media (already stored in the HF dataset bekbol446/neuro-channel)
+scroll/out/
+scroll/small/
+mtest/out/
+test_outputs/
+*.mp4
+*.wav
+*.mp3
+*.png
+__pycache__/
+.DS_Store
