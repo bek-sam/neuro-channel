@@ -1,13 +1,13 @@
-"""neuro-pipeline: the whole video runs inside Modal. Deploy once (from the Mac sandbox):  modal deploy gpu/modal_app3.py
+"""video-gen-pipeline: the whole video runs inside Modal. Deploy once (from the Mac sandbox):  modal deploy gpu/modal_app3.py
 Start a video from anywhere with one HTTPS call (no Mac needed):
-  POST https://<workspace>--neuro-pipeline-start.modal.run   header X-Key: sha256(HF_TOKEN)
+  POST https://<workspace>--video-gen-pipeline-start.modal.run   header X-Key: sha256(HF_TOKEN)
   body {"project": "...", "profile": "standard", "budget_usd": 10}
 Inputs  : HF dataset work/<project>/scenes.json (+ meta.json with title/thumbnail idea)
 Progress: HF dataset work/<project>/status.json      Output: HF dataset videos/<project>/final.mp4, thumbnail.png"""
 import modal, os, json, time
 
 HERE = os.path.dirname(__file__)
-app = modal.App("neuro-pipeline")
+app = modal.App("video-gen-pipeline")
 code = lambda img: img.add_local_file(f"{HERE}/models.py", "/root/models.py").add_local_file(
     f"{HERE}/worker.py", "/root/worker.py").add_local_file(f"{HERE}/editor.py", "/root/editor.py")
 
@@ -27,8 +27,8 @@ edit_image = code(modal.Image.debian_slim(python_version="3.11").apt_install("ff
                   "curl -sSL -O https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"))
 web_image = code(modal.Image.debian_slim(python_version="3.11").pip_install("fastapi[standard]", "huggingface_hub", "anthropic", "pillow"))
 
-cache = modal.Volume.from_name("neuro-model-cache", create_if_missing=True)
-SECRET = [modal.Secret.from_name("neuro-hf")]
+cache = modal.Volume.from_name("video-gen-cache", create_if_missing=True)
+SECRET = [modal.Secret.from_name("video-gen-hf")]
 gpu_kw = dict(image=gpu_image, timeout=6 * 3600, volumes={"/cache": cache}, secrets=SECRET, max_containers=3)
 
 
@@ -98,13 +98,13 @@ VOICE_FN = {"chatterbox": g_voice, "qwen3tts": g_voice_qwen}
 
 def review_images(project, scenes, log):
     """Claude looks at both kept candidates of every scene and swaps in the 2nd one when it is clearly better.
-    Runs only if ANTHROPIC_API_KEY is in the neuro-hf secret. Returns {scene: score} of scenes still below 6."""
+    Runs only if ANTHROPIC_API_KEY is in the video-gen-hf secret. Returns {scene: score} of scenes still below 6."""
     import base64, io, re, tempfile
     import anthropic
     from concurrent.futures import ThreadPoolExecutor
     from PIL import Image
     from huggingface_hub import HfApi, snapshot_download
-    REPO = "bekbol446/neuro-channel"; tok = os.environ["HF_TOKEN"]; d = tempfile.mkdtemp()
+    REPO = "bekbol446/video_gen"; tok = os.environ["HF_TOKEN"]; d = tempfile.mkdtemp()
     snapshot_download(REPO, repo_type="dataset", allow_patterns=[f"work/{project}/imgs/img_*.png"], local_dir=d, token=tok)
     d = f"{d}/work/{project}/imgs"; client = anthropic.Anthropic()
 
@@ -151,7 +151,7 @@ def controller(project, profile="standard", budget_usd=10.0):
     import sys; sys.path.insert(0, "/root")
     from models import PROFILES, IMAGE, VIDEO, VOICE, MUSIC, PRICE, FALLBACK, pick_heroes, estimate_usd as estimate_with
     from huggingface_hub import HfApi, hf_hub_download
-    REPO = "bekbol446/neuro-channel"; api = HfApi(token=os.environ["HF_TOKEN"]); T0 = time.time()
+    REPO = "bekbol446/video_gen"; api = HfApi(token=os.environ["HF_TOKEN"]); T0 = time.time()
     log, cost = [], {"usd": 0.0}
 
     def status(state, **kw):

@@ -7,7 +7,7 @@ output/
 *.env
 client_secret*.json
 yt_token.json
-# generated media (already stored in the HF dataset bekbol446/neuro-channel)
+# generated media (already stored in the HF dataset bekbol446/video_gen)
 scroll/out/
 scroll/small/
 mtest/out/
@@ -18,3 +18,7 @@ test_outputs/
 *.png
 __pycache__/
 .DS_Store
+*.log
+.venv/
+projects/
+.cache/

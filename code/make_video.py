@@ -2,14 +2,14 @@
 scenes.json -> Kaggle GPU (SDXL images, CLIP pick, LTX animation, Real-ESRGAN) -> voice + edit -> Hugging Face"""
 import json, os, subprocess, sys, shutil, time
 H = os.path.dirname(os.path.abspath(__file__)); P = sys.argv[1]; D = f"{H}/projects/{P}"
-USER, HF_REPO = "bekbolsunsamaganov", "bekbol446/neuro-channel"
+USER, HF_REPO = "bekbolsunsamaganov", "bekbol446/video_gen"
 def sh(c, **k): print("$", c[:120], flush=True); return subprocess.run(c, shell=True, check=True, text=True, capture_output=True, **k).stdout
 for l in open(f"{H}/keys.env"):
     if "=" in l: k, v = l.strip().split("=", 1); os.environ[k] = v
 scenes = json.load(open(f"{D}/scenes.json")); print(len(scenes), "scenes")
 # 1. scenes -> Kaggle dataset
 ds = f"{D}/_ds"; shutil.rmtree(ds, True); os.makedirs(ds); shutil.copy(f"{D}/scenes.json", ds)
-json.dump({"title": f"neuro-{P}", "id": f"{USER}/neuro-{P}", "licenses": [{"name": "CC0-1.0"}]}, open(f"{ds}/dataset-metadata.json", "w"))
+json.dump({"title": f"video-gen-{P}", "id": f"{USER}/video-gen-{P}", "licenses": [{"name": "CC0-1.0"}]}, open(f"{ds}/dataset-metadata.json", "w"))
 try: sh(f"kaggle datasets create -p {ds}")
 except subprocess.CalledProcessError: sh(f"kaggle datasets version -p {ds} -m update")
 time.sleep(60)
@@ -17,7 +17,7 @@ time.sleep(60)
 k = f"{D}/_k"; shutil.rmtree(k, True); os.makedirs(k); shutil.copy(f"{H}/kR/render.py", k)
 json.dump({"id": f"{USER}/render-{P}", "title": f"render-{P}", "code_file": "render.py", "language": "python", "kernel_type": "script",
            "is_private": True, "enable_gpu": True, "enable_internet": True, "machine_shape": "NvidiaTeslaT4",
-           "dataset_sources": [f"{USER}/neuro-{P}"], "competition_sources": [], "kernel_sources": []}, open(f"{k}/kernel-metadata.json", "w"))
+           "dataset_sources": [f"{USER}/video-gen-{P}"], "competition_sources": [], "kernel_sources": []}, open(f"{k}/kernel-metadata.json", "w"))
 print(sh(f"kaggle kernels push -p {k}"))
 time.sleep(90)
 while True:

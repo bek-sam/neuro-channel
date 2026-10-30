@@ -44,7 +44,7 @@ class Modal:
     def available(self): return bool(os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET"))
     def submit(self, P, D, idxs):
         import modal
-        fn = modal.Function.from_name("neuro-render", "render_scenes")
+        fn = modal.Function.from_name("video-gen-render", "render_scenes")
         call = fn.spawn(json.load(open(f"{D}/scenes.json")), idxs)
         return {"provider": self.name, "ref": call.object_id, "idxs": idxs, "t0": time.time()}
     def poll(self, job):
@@ -71,7 +71,7 @@ class Lightning:
         os.makedirs(f"{D}/_lt", exist_ok=True)
         open(f"{D}/_lt/job.py", "w").write(CORE + f'\nimport json\nrender(json.load(open("scenes.json")), {idxs}, "out")\n')
         shutil.copy(f"{D}/scenes.json", f"{D}/_lt/")
-        j = Job.run(name=f"neuro-{P}-{int(time.time())}", machine=Machine.T4,
+        j = Job.run(name=f"video-gen-{P}-{int(time.time())}", machine=Machine.T4,
                     command=f"pip install -q {PIP} && python job.py")
         return {"provider": self.name, "ref": j.name, "idxs": idxs, "t0": time.time()}
     def poll(self, job):

@@ -1,0 +1,10 @@
+huggingface_hub>=1.0
+gradio_client>=2.0
+kaggle>=2.0
+edge-tts>=7.3
+faster-whisper>=1.2
+av>=14,<16
+pillow
+numpy
+soundfile
+google-genai

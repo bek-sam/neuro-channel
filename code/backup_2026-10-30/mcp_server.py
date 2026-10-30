@@ -1,14 +1,14 @@
-"""neuro-mcp: remote MCP server so Claude can drive neuro-pipeline. Deploy:  modal deploy gpu/mcp_server.py
-Needs neuro-pipeline deployed first (it calls its `controller`). Uses the same `neuro-hf` secret.
+"""video-gen-mcp: remote MCP server so Claude can drive video-gen-pipeline. Deploy:  modal deploy gpu/mcp_server.py
+Needs video-gen-pipeline deployed first (it calls its `controller`). Uses the same `video-gen-hf` secret.
 Connector URL (paste into claude.ai -> Settings -> Connectors -> Add custom connector, or `claude mcp add`):
-  https://<workspace>--neuro-mcp-serve.modal.run/<TOKEN>/mcp
+  https://<workspace>--video-gen-mcp-serve.modal.run/<TOKEN>/mcp
   TOKEN = sha256("mcp:" + HF_TOKEN)   ->  python3 -c 'import hashlib;print(hashlib.sha256(b"mcp:"+b"<HF_TOKEN>").hexdigest())'"""
 import modal, os, json
 
-app = modal.App("neuro-mcp")
+app = modal.App("video-gen-mcp")
 image = (modal.Image.debian_slim(python_version="3.11").pip_install("mcp>=1.13,<2", "huggingface_hub")
          .add_local_file(f"{os.path.dirname(__file__)}/models.py", "/root/models.py"))
-REPO = "bekbol446/neuro-channel"
+REPO = "bekbol446/video_gen"
 PROFILES = ["free", "standard", "max", "max_all"]
 
 
@@ -18,7 +18,7 @@ def build():
     from mcp.server.transport_security import TransportSecuritySettings
     from huggingface_hub import HfApi, hf_hub_download
     tok = os.environ["HF_TOKEN"]; api = HfApi(token=tok)
-    mcp = FastMCP("neuro-channel", stateless_http=True,
+    mcp = FastMCP("video_gen", stateless_http=True,
                   transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
     rd = lambda path: json.load(open(hf_hub_download(REPO, path, repo_type="dataset", token=tok, force_download=True)))
     put = lambda obj, path: api.upload_file(path_or_fileobj=json.dumps(obj, indent=1).encode(), path_in_repo=path,
@@ -36,7 +36,7 @@ def build():
             raise ValueError("every scene needs 'text' and 'prompt'")
         meta = {k: v for k, v in dict(title=title, thumb_title=thumb_title, thumb_visual=thumb_visual, channel=channel).items() if v}
         put(scenes, f"work/{project}/scenes.json"); put(meta, f"work/{project}/meta.json")
-        c = modal.Function.from_name("neuro-pipeline", "controller").spawn(project, profile, float(budget_usd))
+        c = modal.Function.from_name("video-gen-pipeline", "controller").spawn(project, profile, float(budget_usd))
         return {"project": project, "call_id": c.object_id, "scenes": len(scenes), "profile": profile}
 
     @mcp.tool()
@@ -84,7 +84,7 @@ def build():
     return guarded
 
 
-@app.function(image=image, secrets=[modal.Secret.from_name("neuro-hf")], min_containers=0, timeout=600)
+@app.function(image=image, secrets=[modal.Secret.from_name("video-gen-hf")], min_containers=0, timeout=600)
 @modal.concurrent(max_inputs=20)
 @modal.asgi_app()
 def serve():

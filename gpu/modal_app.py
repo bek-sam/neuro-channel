@@ -2,13 +2,13 @@
 Runs render_core.render() on an A100. Models are cached in a Modal Volume (download once)."""
 import modal, os
 
-app = modal.App("neuro-render")
+app = modal.App("video-gen-render")
 image = (modal.Image.debian_slim(python_version="3.11")
          .apt_install("ffmpeg", "libgl1", "libglib2.0-0")
          .pip_install("torch", "diffusers", "transformers", "accelerate", "sentencepiece",
                       "imageio", "imageio-ffmpeg", "spandrel", "pillow", "numpy")
          .add_local_file(os.path.join(os.path.dirname(__file__), "render_core.py"), "/root/render_core.py"))
-cache = modal.Volume.from_name("neuro-model-cache", create_if_missing=True)
+cache = modal.Volume.from_name("video-gen-cache", create_if_missing=True)
 
 
 @app.function(image=image, gpu="A100-40GB", timeout=6 * 3600, volumes={"/cache": cache},

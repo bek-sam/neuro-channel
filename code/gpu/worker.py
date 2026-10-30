@@ -4,7 +4,7 @@ Used by modal_app2.py (and can be used on Kaggle)."""
 import os, json, time, gc, traceback, glob
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 from models import IMAGE, VIDEO, VOICE, MUSIC
-REPO = "bekbol446/neuro-channel"
+REPO = os.environ.get("HF_REPO") or "bekbol446/video_gen"
 STYLE = ", cinematic scientific visualization, photorealistic, dark background, volumetric light, shallow depth of field, ultra detailed"
 NEG_I = "text, letters, watermark, logo, cartoon, low quality, blurry, deformed, ugly, jpeg artifacts, frame, border"
 NEG_V = "blurry, distorted, morphing, melting, flicker, text, watermark, low quality, static, jittery"

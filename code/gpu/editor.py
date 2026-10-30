@@ -5,6 +5,8 @@ import os, glob, json, subprocess, time
 from worker import _pull, _hf, REPO
 
 W, H, FPS, PAUSE, XF = 1920, 1080, 30, 0.35, 0.5
+WHISPER_DIR = os.environ.get("WHISPER_DIR", "/cache/whisper")   # local runs set these
+FONT = os.environ.get("SUB_FONT", "DejaVu Sans")
 
 
 def sh(c):
@@ -31,7 +33,10 @@ def kenburns(img, seconds, out, kind):
 def norm_clip(clip, seconds, out):
     """AI clip -> 1080p 30fps, cut to `seconds` (slowed slightly if it is a bit too short)."""
     d = dur(clip); speed = min(1.0, d / seconds) if seconds > d else 1.0
-    sh(f"ffmpeg -loglevel error -y -i '{clip}' -vf \"setpts=PTS/{speed:.4f},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,"
+    num, den = sh(f"ffprobe -v error -select_streams v -show_entries stream=r_frame_rate -of csv=p=0 '{clip}'").strip().split("/")
+    # 16 fps clips (free Wan Space, no RIFE) -> motion-interpolated 32 fps instead of repeated frames
+    mi = "minterpolate=fps=32:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1," if int(num) / int(den or 1) < 24 else ""
+    sh(f"ffmpeg -loglevel error -y -i '{clip}' -vf \"{mi}setpts=PTS/{speed:.4f},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,"
        f"crop={W}:{H},fps={FPS},format=yuv420p\" -t {seconds:.3f} -c:v libx264 -preset veryfast -crf 18 -an '{out}'")
 
 
@@ -51,7 +56,7 @@ def voice_kokoro(scenes, d):
 def ass_subs(wav, out):
     """Word-timed subtitles: phrases of up to 4 words, YouTube style."""
     from faster_whisper import WhisperModel
-    m = WhisperModel("small.en", device="cpu", compute_type="int8", download_root="/cache/whisper", cpu_threads=16)
+    m = WhisperModel("small.en", device="cpu", compute_type="int8", download_root=WHISPER_DIR, cpu_threads=os.cpu_count() or 4)
     segs, _ = m.transcribe(wav, word_timestamps=True, vad_filter=False)
     words = [w for s in segs for w in s.words]
     t = lambda x: f"{int(x // 3600)}:{int(x % 3600 // 60):02d}:{x % 60:05.2f}"
@@ -63,7 +68,7 @@ def ass_subs(wav, out):
     if cur: lines.append(cur)
     hdr = ("[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\n"
            "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Outline, Shadow, Alignment, MarginV\n"
-           "Style: Default,DejaVu Sans,64,&H00FFFFFF,&H00000000,&H64000000,1,4,1,2,90\n\n[Events]\n"
+           f"Style: Default,{FONT},64,&H00FFFFFF,&H00000000,&H64000000,1,4,1,2,90\n\n[Events]\n"
            "Format: Layer, Start, End, Style, Text\n")
     ev = "".join(f"Dialogue: 0,{t(l[0].start)},{t(max(l[-1].end, l[0].start + 0.4))},Default,{' '.join(w.word.strip() for w in l)}\n" for l in lines)
     open(out, "w").write(hdr + ev)
@@ -71,13 +76,28 @@ def ass_subs(wav, out):
 
 
 def edit(project, scenes, voice_model, hero_model):
-    t0 = time.time(); D = "/tmp/ed"; os.makedirs(f"{D}/parts", exist_ok=True)
+    """Modal: pull everything from Hugging Face, build, upload videos/<project>/."""
+    t0 = time.time(); D = "/tmp/ed"; os.makedirs(D, exist_ok=True)
     imgs = _pull(project, "imgs", D)
     clips = _pull(project, f"clips_{hero_model}", D) if hero_model else None
     if voice_model != "kokoro":
         vdir = _pull(project, f"voice_{voice_model}", D)
     else:
         vdir = f"{D}/voice"; os.makedirs(vdir, exist_ok=True); voice_kokoro(scenes, vdir)
+    # background music: generated for this video (work/<project>/music/music.wav), else any mp3 at assets/music.mp3
+    music = None
+    from huggingface_hub import hf_hub_download
+    for f in (f"work/{project}/music/music.wav", "assets/music.mp3"):
+        try: music = hf_hub_download(REPO, f, repo_type="dataset", token=os.environ["HF_TOKEN"]); break
+        except Exception: pass
+    out = f"{D}/out"; r = build(scenes, imgs, clips, vdir, music, D, out)
+    _hf().upload_folder(folder_path=out, path_in_repo=f"videos/{project}", repo_id=REPO, repo_type="dataset")
+    return dict(r, seconds=round(time.time() - t0))
+
+
+def build(scenes, imgs, clips, vdir, music, D, out):
+    """Builds out/final.mp4 (+ subs.ass, thumbnail.png) from local folders. Used by Modal and by the free orchestrator."""
+    os.makedirs(f"{D}/parts", exist_ok=True)
     report = []
     for i, s in enumerate(scenes):
         wav = f"{vdir}/a_{i:03d}.wav"; L = dur(wav) + PAUSE
@@ -111,12 +131,6 @@ def edit(project, scenes, voice_model, hero_model):
     sh(f"ffmpeg -loglevel error -y -f concat -safe 0 -i {D}/list.txt -c copy {D}/joined.mp4")
     sh(f"ffmpeg -loglevel error -y -i {D}/joined.mp4 -vn -ac 1 -ar 16000 {D}/voice.wav")
     n_sub = ass_subs(f"{D}/voice.wav", f"{D}/subs.ass")
-    # background music: generated for this video (work/<project>/music/music.wav), else any mp3 at assets/music.mp3
-    music = None
-    from huggingface_hub import hf_hub_download
-    for f in (f"work/{project}/music/music.wav", "assets/music.mp3"):
-        try: music = hf_hub_download(REPO, f, repo_type="dataset", token=os.environ["HF_TOKEN"]); break
-        except Exception: pass
     if music:
         af = ("[1:a]volume=0.22,aresample=48000[m];[m][0:a]sidechaincompress=threshold=0.04:ratio=8:attack=20:release=500[md];"
               "[0:a][md]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[a]")
@@ -131,9 +145,7 @@ def edit(project, scenes, voice_model, hero_model):
         r = subprocess.run(f"ffmpeg -nostats -i {D}/final.mp4 -af ebur128 -f null -", shell=True, capture_output=True, text=True)
         lufs = float(r.stderr.rsplit("I:", 1)[1].split("LUFS")[0])
     except Exception: pass
-    out = f"{D}/out"; os.makedirs(out, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
     os.replace(f"{D}/final.mp4", f"{out}/final.mp4"); os.replace(f"{D}/subs.ass", f"{out}/subs.ass")
-    if os.path.exists(f"{imgs}/thumbnail.png"): sh(f"cp '{imgs}/thumbnail.png' {out}/thumbnail.png")
-    _hf().upload_folder(folder_path=out, path_in_repo=f"videos/{project}", repo_id=REPO, repo_type="dataset")
-    return {"seconds": round(time.time() - t0), "length": round(dur(f"{out}/final.mp4"), 1), "subtitle_lines": n_sub,
-            "music": bool(music), "lufs": lufs, "scenes": report}
+    if os.path.exists(f"{imgs}/thumbnail.png"): sh(f"cp '{imgs}/thumbnail.png' '{out}/thumbnail.png'")
+    return {"length": round(dur(f"{out}/final.mp4"), 1), "subtitle_lines": n_sub, "music": bool(music), "lufs": lufs, "scenes": report}

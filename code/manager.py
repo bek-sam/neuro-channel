@@ -9,7 +9,7 @@ H = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, f"{H}/gpu")
 for l in open(f"{H}/keys.env"):
     if "=" in l: k, v = l.strip().split("=", 1); os.environ[k] = v
 from providers import ALL
-HF_REPO = "bekbol446/neuro-channel"
+HF_REPO = "bekbol446/video_gen"
 cmd, P = sys.argv[1], sys.argv[2]; D = f"{H}/projects/{P}"; SF = f"{D}/state.json"
 load = lambda: json.load(open(SF)) if os.path.exists(SF) else {"jobs": [], "tried": {}, "done": []}
 save = lambda s: json.dump(s, open(SF, "w"), indent=1)

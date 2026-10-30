@@ -1,7 +1,7 @@
 """After Kaggle render finishes: python3 finish.py <project>  -> download, edit, save to HF"""
 import os, sys, subprocess
 H = os.path.dirname(os.path.abspath(__file__)); P = sys.argv[1]; D = f"{H}/projects/{P}"
-USER, HF_REPO = "bekbolsunsamaganov", "bekbol446/neuro-channel"
+USER, HF_REPO = "bekbolsunsamaganov", "bekbol446/video_gen"
 for l in open(f"{H}/keys.env"):
     if "=" in l: k, v = l.strip().split("=", 1); os.environ[k] = v
 s = subprocess.run(f"kaggle kernels status {USER}/render-{P}", shell=True, capture_output=True, text=True).stdout

@@ -1,9 +1,9 @@
-"""Deploy:  modal deploy gpu/modal_app2.py      (needs Modal secret "neuro-hf" with HF_TOKEN)
+"""Deploy:  modal deploy gpu/modal_app2.py      (needs Modal secret "video-gen-hf" with HF_TOKEN)
 One function per GPU size. Each can run any model from models.py. Results go straight to Hugging Face."""
 import modal, os
 
 HERE = os.path.dirname(__file__)
-app = modal.App("neuro-render2")
+app = modal.App("video-gen-render2")
 # video/image image: no voice packages (avoids torch version clashes)
 image = (modal.Image.debian_slim(python_version="3.11")
          .apt_install("ffmpeg", "git")
@@ -20,9 +20,9 @@ voice_image = (modal.Image.debian_slim(python_version="3.11")
                .env({"HF_HOME": "/cache/hf"})
                .add_local_file(f"{HERE}/models.py", "/root/models.py")
                .add_local_file(f"{HERE}/worker.py", "/root/worker.py"))
-cache = modal.Volume.from_name("neuro-model-cache", create_if_missing=True)
+cache = modal.Volume.from_name("video-gen-cache", create_if_missing=True)
 common = dict(image=image, timeout=6 * 3600, volumes={"/cache": cache},
-              secrets=[modal.Secret.from_name("neuro-hf")], max_containers=3)
+              secrets=[modal.Secret.from_name("video-gen-hf")], max_containers=3)
 
 
 def _run(stage, model, scenes, idxs, project):
@@ -51,7 +51,7 @@ def run_a100_80(stage, model, scenes, idxs, project): return _run(stage, model, 
 def run_h100(stage, model, scenes, idxs, project): return _run(stage, model, scenes, idxs, project)
 
 @app.function(gpu="A10G", image=voice_image, timeout=2 * 3600, volumes={"/cache": cache},
-              secrets=[modal.Secret.from_name("neuro-hf")], max_containers=2)
+              secrets=[modal.Secret.from_name("video-gen-hf")], max_containers=2)
 def run_voice(scenes, idxs, project): return _run("voice", "chatterbox", scenes, idxs, project)
 
 FN = {"A10G": "run_a10g", "A100-40GB": "run_a100_40", "A100-80GB": "run_a100_80", "H100": "run_h100", "voice": "run_voice"}
