@@ -1,11 +1,13 @@
 """Kaggle batch provider: free T4 x2 GPUs (about 30 h a week). Pushes ONE script kernel that makes many items, polls it,
 downloads the results. Inputs travel inside the script (prompts), so no Hugging Face token is ever sent to Kaggle.
   run_images(jobs, out_dir, log)   jobs = [(file_name, prompt, seed)] -> out_dir/<file_name>
-Measured on T4: Qwen-Image 20B (offloaded) 29 min/image -> unusable; Z-Image-Turbo 6B: see SEC below."""
+Measured on T4: Qwen-Image 20B (offloaded) 29 min/image -> unusable; Z-Image-Turbo 6B bf16 at 1440x816: 4.8 min/image.
+T4 notes: fp16 -> black images (overflow); 1920x1088 bf16 -> out of memory (no bf16 flash attention on sm75).
+The free account always gets T4 x2 (asking for L4 also returned a T4). Two kernels can run at the same time."""
 import os, json, time, glob, shutil, subprocess, tempfile
 USER = os.environ.get("KAGGLE_USER", "bekbolsunsamaganov")
 ACC = os.environ.get("KAGGLE_ACC", "NvidiaTeslaT4")  # NvidiaL4 if the account may use it
-SEC = {"zimage": 60}  # (e) per image on T4; replaced by the measured value after the first run
+SEC = {"zimage": 290}  # (m) per image, T4, 1440x816, bf16, + ~285 s pip install and model load per kernel
 
 IMAGE_SCRIPT = r'''
 import subprocess, json, time, os, sys, traceback

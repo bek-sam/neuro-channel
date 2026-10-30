@@ -46,7 +46,7 @@ class Router:
 def run(argv):
     ap = argparse.ArgumentParser(); ap.add_argument("project")
     ap.add_argument("--voice", default="edge", choices=list(pv.VOICE)); ap.add_argument("--heroes", type=int, default=15)
-    ap.add_argument("--candidates", type=int, default=2); ap.add_argument("--min-quality", type=int, default=6)
+    ap.add_argument("--candidates", type=int, default=1); ap.add_argument("--min-quality", type=int, default=6)
     ap.add_argument("--images", default="kaggle", choices=["kaggle", "space"], help="bulk images on Kaggle, or all on ZeroGPU Spaces/APIs")
     ap.add_argument("--no-upload", action="store_true")
     a = ap.parse_args(argv); P = a.project; t0 = time.time()
