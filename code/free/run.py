@@ -12,7 +12,7 @@ sys.path[:0] = [CODE, f"{CODE}/gpu"]
 if os.path.exists(f"{ROOT}/keys/keys.env"):  # laptop; in the cloud the keys come from secrets
     for l in open(f"{ROOT}/keys/keys.env"):
         if "=" in l and not l.startswith("#"): k, v = l.strip().split("=", 1); os.environ.setdefault(k, v.strip("'\""))
-os.environ["HF_REPO"] = os.environ.get("HF_REPO") or "bekbol446/video_gen"  # empty repo variable -> default
+os.environ["HF_REPO"] = os.environ.get("HF_REPO") or "bekbol446/neuro-channel"  # empty repo variable -> default
 os.environ.setdefault("WHISPER_DIR", f"{ROOT}/.cache/whisper"); os.environ.setdefault("SUB_FONT", "Arial" if sys.platform == "darwin" else "DejaVu Sans")
 try: import static_ffmpeg; static_ffmpeg.add_paths(weak=True)  # laptop; cloud runners have ffmpeg installed
 except ImportError: pass
@@ -234,7 +234,7 @@ def resume_all(max_attempts=6):
         if not (f.startswith("work/") and f.endswith("/status.json") and f.count("/") == 2): continue
         st = json.load(open(hf_hub_download(REPO, f, repo_type="dataset", token=os.environ["HF_TOKEN"], force_download=True)))
         if "args" not in st or st.get("attempts", 0) >= max_attempts: continue  # only projects started by this orchestrator
-        if st["state"].startswith("waiting") or (st["state"] == "done" and st.get("clips_missing")):
+        if st["state"].startswith("waiting") or st["state"] == "queued" or (st["state"] == "done" and st.get("clips_missing")):
             print("== resume", f.split("/")[1], st["state"], flush=True)
             try: run([f.split("/")[1]] + st["args"])
             except SystemExit as e: print("stopped:", e)
