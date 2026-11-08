@@ -36,7 +36,8 @@ A video is a list of scenes. Each scene is one narration line over one picture:
   ultra detailed, 16:9, no text". Never ask for text or letters in the image.
 - motion: how the picture moves, e.g. "slow push in", "signals racing along the fibers", "camera orbits the brain".
 - hero (optional): true for the shots that most deserve a real motion clip (Wan2.2). The rest get a slow camera move.
-  About 1 hero per 2-3 scenes; free clip quota is about 5 clips a day, so more heroes means the video takes longer.
+  About 1 hero per 2-3 scenes. Free ZeroGPU clips are about 5 a day; after that clips come from the Modal free credit
+  and then Muapi (paid), each up to its monthly cap, and the rest wait for the next day's free quota.
 
 Good videos: a hook in the first scene, one idea per scene, 20-60 scenes for 4-12 minutes.
 Output: 1920x1080 MP4 with narration, music bed, burned-in subtitles, plus a thumbnail when thumb_title is set.

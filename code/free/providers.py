@@ -71,6 +71,128 @@ class WanSpace:  # Wan2.2-I2V-A14B fp8 + lightning LoRA, 6 steps, 832x480 @16 fp
         shutil.copy(_file(r), out)
 
 
+class WanSpaceR3gm(WanSpace):  # a second Wan2.2 14B fp8 Space (same model, different owner): used when the first is down
+    name, space = "zg_wan22_r3gm", "r3gm/wan2-2-fp8da-aoti-preview"
+    def clip(self, image, prompt, seed, out):
+        from gradio_client import handle_file
+        r = _call(self.space, "/generate_video", input_image=handle_file(image), last_image=None, prompt=prompt, steps=6,
+                  duration_seconds=5.0, guidance_scale=1, guidance_scale_2=1, seed=seed, randomize_seed=False)
+        shutil.copy(_file(r), out)  # returns ({video, subtitles}, file, seed); _file picks the video
+
+
+class LtxSpace:  # Lightricks' own LTX-2.3 Space (distilled): a different model family, so it still works if Wan Spaces break
+    name, kind, quality, sec, limit, space = "zg_ltx23", "video", 7, 45, 1, "Lightricks/LTX-2-3"
+    def available(self): return bool(HF())
+    def clip(self, image, prompt, seed, out):
+        from gradio_client import handle_file
+        r = _call(self.space, "/generate_video", input_image=handle_file(image), prompt=prompt, duration=5.0, enhance_prompt=False,
+                  seed=seed, randomize_seed=False, height=704, width=1280)
+        shutil.copy(_file(r), out)
+
+
+# ------------------------------------------------------------- spending caps for the providers that can cost money
+# One ledger per month on the HF dataset (budget/<YYYY-MM>.json -> {"modal": usd, "muapi": usd}), shared by every runner.
+_blk = threading.Lock()
+CAPS = {"modal": float(os.environ.get("MODAL_MONTHLY_USD") or 25),   # Modal gives $30 free each month; keep $5 spare
+        "muapi": float(os.environ.get("MUAPI_MONTHLY_USD") or 5)}    # Muapi is real money; 0 turns it off
+
+
+def _ledger_path(): return f"budget/{time.strftime('%Y-%m', time.gmtime())}.json"
+
+
+def _ledger():
+    from huggingface_hub import hf_hub_download
+    try: return json.load(open(hf_hub_download(os.environ["HF_REPO"], _ledger_path(), repo_type="dataset", token=HF(), force_download=True)))
+    except Exception: return {}
+
+
+def budget_left(who):
+    with _blk: return CAPS[who] - float(_ledger().get(who, 0))
+
+
+def budget_spend(who, usd):
+    """Adds usd to this month's ledger. Read-modify-write under a lock: exact within one runner, close enough across two."""
+    from huggingface_hub import HfApi
+    with _blk:
+        led = _ledger(); led[who] = round(float(led.get(who, 0)) + usd, 4)
+        HfApi(token=HF()).upload_file(path_or_fileobj=json.dumps(led, indent=1).encode(), path_in_repo=_ledger_path(),
+                                      repo_id=os.environ["HF_REPO"], repo_type="dataset", commit_message=f"budget: {who} +${usd:.3f}")
+
+
+class ModalWan:  # Wan2.2-I2V-A14B + 4-step lightx2v LoRAs on a Modal H100, 1280x720 @16 fps (code/free/modal_clip.py)
+    """Uses the $30/month Modal credit. Cost is counted conservatively: wall time of the call (cold start included) at
+    the H100 rate, plus 30 s for the idle minute before the container stops. Over the cap -> QuotaError."""
+    name, kind, quality, sec, limit = "modal_wan22", "video", 9, 150, 1
+    USD_PER_SEC = 3.95 / 3600  # Modal H100, on-demand
+    def available(self):
+        if not (os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET") and HF() and CAPS["modal"] > 0): return False
+        try: import modal  # noqa: F401
+        except ImportError: return False
+        return True
+    def clip(self, image, prompt, seed, out):
+        if budget_left("modal") < 0.6: raise QuotaError(f"modal: monthly cap ${CAPS['modal']:.0f} reached")
+        import modal
+        t = time.time()
+        try: data = modal.Cls.from_name("neuro-clip", "Wan")().clip.remote(open(image, "rb").read(), prompt, int(seed))
+        finally: budget_spend("modal", (time.time() - t + 30) * self.USD_PER_SEC)
+        open(out, "wb").write(data)
+
+
+class Muapi:  # paid API for closed models (Kling, Veo, Seedance, Hailuo...): last resort, under MUAPI_MONTHLY_USD
+    """MUAPI_API_KEY + optional MUAPI_MODEL (any image-to-video endpoint on muapi.ai, default Kling 2.5 Turbo Std, $0.28/5 s).
+    Upload the still -> submit -> poll /predictions/<id>/result. The charge comes back in the response and goes in the ledger."""
+    name, kind, quality, sec, limit = "muapi", "video", 9, 120, 2
+    BASE = "https://api.muapi.ai/api/v1"
+    MODEL = os.environ.get("MUAPI_MODEL") or "kling-v2.5-turbo-std-i2v"
+    PRICE = float(os.environ.get("MUAPI_CLIP_USD") or 0.6)  # used only when Muapi does not report the charge (worst-case guess)
+    def available(self): return bool(os.environ.get("MUAPI_API_KEY")) and CAPS["muapi"] > 0
+    def _http(self):
+        import httpx
+        return httpx.Client(base_url=self.BASE, headers={"x-api-key": os.environ["MUAPI_API_KEY"]}, timeout=120)
+    def payload(self, image_url, prompt):
+        m = self.MODEL
+        p = {"prompt": prompt[:1500]}
+        if m.startswith(("seedance-2", "seedance-v2")): p["images_list"] = [image_url]; p.update(aspect_ratio="16:9", resolution="720p")
+        else: p["image_url"] = image_url
+        if "veo" in m: p.update(aspect_ratio="16:9", resolution="720p")  # Veo clips are 8 s; the editor cuts them to the scene
+        else: p["duration"] = 5
+        return p
+    @staticmethod
+    def _check(r):
+        if r.status_code in (402, 429) or "insufficient" in r.text.lower(): raise QuotaError(f"muapi {r.status_code}: {r.text[:150]}")
+        r.raise_for_status(); return r.json()
+    def clip(self, image, prompt, seed, out):
+        left = budget_left("muapi")
+        if left < self.PRICE: raise QuotaError(f"muapi: monthly cap ${CAPS['muapi']:.2f} reached (${left:.2f} left)")
+        with self._http() as c:
+            with open(image, "rb") as f: up = self._check(c.post("/upload_file", files={"file": (os.path.basename(image), f, "image/png")}))
+            url = up.get("url") or up.get("file_url") or (up.get("data") or {}).get("url")
+            if not url: raise RuntimeError(f"muapi upload: no url in {str(up)[:200]}")
+            sub = self._check(c.post(f"/{self.MODEL}", json=self.payload(url, prompt)))
+            rid = sub.get("request_id") or sub.get("id") or (sub.get("data") or {}).get("request_id")
+            if not rid: raise RuntimeError(f"muapi submit: no request_id in {str(sub)[:200]}")
+            charged = False
+            try:
+                for _ in range(180):  # 15 min
+                    time.sleep(5)
+                    r = c.get(f"/predictions/{rid}/result")
+                    if r.status_code >= 500 or r.status_code == 429: continue  # busy / polling too fast: ask again
+                    res = self._check(r); st = str(res.get("status") or (res.get("data") or {}).get("status") or "").lower()
+                    if st in ("failed", "error", "cancelled", "canceled"): raise RuntimeError(f"muapi {rid}: {str(res)[:200]}")
+                    if st in ("completed", "succeeded", "success"):
+                        cost = (res.get("cost") or sub.get("cost") or {}).get("amount_usd")
+                        budget_spend("muapi", float(cost) if cost is not None else self.PRICE); charged = True
+                        o = res.get("outputs") or (res.get("data") or {}).get("outputs") or []
+                        vurl = (o[0] if o else None) or res.get("url") or (res.get("output") or {}).get("url")
+                        if not vurl: raise RuntimeError(f"muapi {rid}: no video url")
+                        with c.stream("GET", vurl) as v, open(out, "wb") as f:
+                            for b in v.iter_bytes(): f.write(b)
+                        return
+                raise RuntimeError(f"muapi {rid}: timed out")
+            finally:
+                if not charged: budget_spend("muapi", self.PRICE)  # submitted but no result: count it, the job may still bill
+
+
 class Qwen3TTSSpace:
     name, kind, quality, sec, limit, space = "zg_qwen3tts", "voice", 8, 10, 2, "Qwen/Qwen3-TTS"
     def available(self): return bool(HF())
@@ -159,6 +281,8 @@ class CloudflareImage:  # needs CF_ACCOUNT_ID + CF_API_TOKEN (Workers AI free da
 
 # best first. The router keeps ONE image model and ONE voice per video when it can (consistent look and narrator).
 IMAGE = [ZImage(), GeminiImage(), Flux2Klein(), CloudflareImage(), Pollinations()]
-VIDEO = [WanSpace()]
+# clips: free ZeroGPU first (one daily quota per HF account, shared by all three Spaces; the 2nd and 3rd are for when a
+# Space is down), then the Modal free credit, then paid Muapi. Each paid one stops at its monthly cap.
+VIDEO = [WanSpace(), WanSpaceR3gm(), LtxSpace(), ModalWan(), Muapi()]
 VOICE = {"edge": EdgeTTS(), "qwen3tts": Qwen3TTSSpace()}
 MUSIC = [MusicLibrary()]

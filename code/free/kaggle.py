@@ -5,7 +5,7 @@ Measured on T4: Qwen-Image 20B (offloaded) 29 min/image -> unusable; Z-Image-Tur
 T4 notes: fp16 -> black images (overflow); 1920x1088 bf16 -> out of memory (no bf16 flash attention on sm75).
 The free account always gets T4 x2 (asking for L4 also returned a T4). Two kernels can run at the same time."""
 import os, json, time, glob, shutil, subprocess, tempfile
-USER = os.environ.get("KAGGLE_USER", "bekbolsunsamaganov")
+USER = os.environ.get("KAGGLE_USER") or os.environ.get("KAGGLE_USERNAME") or "bekbolsunsamaganov"
 ACC = os.environ.get("KAGGLE_ACC", "NvidiaTeslaT4")  # NvidiaL4 if the account may use it
 SEC = {"zimage": 290}  # (m) per image, T4, 1440x816, bf16, + ~285 s pip install and model load per kernel
 

@@ -8,3 +8,5 @@ pillow
 numpy
 soundfile
 google-genai
+modal>=1.0
+httpx

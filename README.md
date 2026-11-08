@@ -6,7 +6,7 @@ Connect it to Claude as an MCP server, ask for a video, and Claude writes the sc
 | Part | Model | Runs on (free) | Fallback |
 |---|---|---|---|
 | Images | Z-Image-Turbo | Kaggle T4 ×2 | Hugging Face ZeroGPU Space, FLUX.2 klein Space |
-| Motion clips | Wan2.2 image-to-video | Hugging Face ZeroGPU Space | slow camera move over the still |
+| Motion clips | Wan2.2 / LTX-2.3 image-to-video | Hugging Face ZeroGPU Spaces (3) | Modal H100 Wan2.2 14B (free $30/month credit), then Muapi Kling/Veo/Seedance (paid, capped), then a slow camera move |
 | Voice | edge-tts or Qwen3-TTS | GitHub Actions runner / ZeroGPU Space | the other one |
 | Voice check | faster-whisper | GitHub Actions runner | lines it mishears are made again |
 | Edit | ffmpeg (32 fps, 1080p, music, subtitles, −14 LUFS) | GitHub Actions runner | any machine with Python |
@@ -24,6 +24,12 @@ Details and measured timings: [`code/free/README.md`](code/free/README.md).
    HF_TOKEN=...
    KAGGLE_API_TOKEN=...
    HF_REPO=<you>/<dataset>
+   # optional, more motion clips:
+   # Modal (then once: modal deploy code/free/modal_clip.py)
+   MODAL_TOKEN_ID=...
+   MODAL_TOKEN_SECRET=...
+   # Muapi, paid; MUAPI_MONTHLY_USD caps it (default 5, 0 = off)
+   MUAPI_API_KEY=...
    ```
 3. `bash scripts/cloud_setup.sh` stores them as encrypted GitHub Actions secrets (edit `R=` in it to your fork).
 

@@ -1,6 +1,6 @@
 """Upload a video to YouTube (PRIVATE by default, AI content disclosed).
 Usage: python3 youtube_upload.py <video.mp4> "<title>" "<description>" [tags,comma,separated] [thumbnail.jpg]
-Needs keys/yt_token.json (made once with yt_auth.py on your Mac)."""
+Needs keys/yt_token.json (made once with code/yt_auth.py on your Mac)."""
 import sys, os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
