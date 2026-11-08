@@ -1,6 +1,6 @@
 """Runs ONE model on a list of scenes. Reads inputs from / writes outputs to the Hugging Face dataset
 (work/<project>/imgs, work/<project>/clips, work/<project>/voice), so no laptop is needed.
-Used by modal_app2.py (and can be used on Kaggle)."""
+Used by modal_app3.py (and can be used on Kaggle)."""
 import os, json, time, gc, traceback, glob
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 from models import IMAGE, VIDEO, VOICE, MUSIC

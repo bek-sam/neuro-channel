@@ -5,7 +5,7 @@ Runs in the cloud (GitHub Actions, .github/workflows/video.yml) or anywhere with
 Inputs : HF work/<project>/scenes.json + meta.json      State: HF work/<project>/free/ (any machine can resume)
 Output : HF videos/<project>/final.mp4, thumbnail.png, report.json      Progress: HF work/<project>/status.json
 Order  : hero images first -> their clips start while the other images are made; voice + music run alongside."""
-import os, sys, json, time, glob, threading, traceback, argparse
+import os, re, sys, json, time, glob, threading, traceback, argparse
 from concurrent.futures import ThreadPoolExecutor, wait
 CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); ROOT = os.path.dirname(CODE)
 sys.path[:0] = [CODE, f"{CODE}/gpu"]
@@ -43,7 +43,24 @@ class Router:
     def threads(self): return max(1, sum(p.limit for p in self.provs))
 
 
+LEASE = 600  # s: a runner whose heartbeat is older than this is gone (crashed / cancelled); its project may be taken over
+IDLE = lambda state: state in ("queued", "done", "failed") or state.startswith("waiting")
+
+
+def kaggle_base(project):
+    """Kaggle kernel slug per project, so two videos never push over each other's kernel. Kaggle titles: 5-50 chars."""
+    s = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", project.lower())).strip("-")[:36].strip("-")
+    return f"vg-{s or 'video'}"
+
+
 def run(argv):
+    """One video. The heartbeat thread (started inside) is stopped however _run ends (done, waiting, error)."""
+    stop = threading.Event()
+    try: return _run(argv, stop)
+    finally: stop.set()
+
+
+def _run(argv, stop):
     ap = argparse.ArgumentParser(); ap.add_argument("project")
     ap.add_argument("--voice", default="edge", choices=list(pv.VOICE)); ap.add_argument("--heroes", type=int, default=15)
     ap.add_argument("--candidates", type=int, default=1); ap.add_argument("--min-quality", type=int, default=6)
@@ -81,10 +98,15 @@ def run(argv):
     n = len(scenes); heroes = pick_heroes(n, a.heroes, [i for i, s in enumerate(scenes) if s.get("hero")])
 
     # ---- log + status (status.json on HF at most once a minute)
-    items, lk, last = [], threading.Lock(), [0.0]
+    items, lk, last, cur = [], threading.Lock(), [0.0], [None, {}]
+    me = os.environ.get("GITHUB_RUN_ID") or f"{os.uname().nodename}-{os.getpid()}-{int(t0)}"
+    def remote_status():
+        try: return rd("status.json")
+        except Exception: return {}
     def status(state, force=False, **kw):
+        cur[0], cur[1] = state, kw
         st = dict(state=state, minutes=round((time.time() - t0) / 60, 1), cost_usd=0, scenes=n, heroes=heroes, args=argv[1:],
-                  attempts=prev.get("attempts", 0) + 1, **kw)
+                  attempts=prev.get("attempts", 0) + 1, runner=me, heartbeat=int(time.time()), **kw)
         json.dump(st, open(f"{D}/status.json", "w"), indent=1)
         if force or time.time() - last[0] > 60:
             last[0] = time.time()
@@ -93,7 +115,17 @@ def run(argv):
     def log(item, prov, sec, err=None):
         with lk: items.append(dict(item=item, provider=prov, sec=round(sec, 1), **({"error": err} if err else {})))
         print(f"[{(time.time() - t0) / 60:5.1f}m] {item:12} {prov:14} {sec:6.1f}s {err or 'ok'}", flush=True)
+    # one runner per project: the cron and a dispatched run can both pick up the same video
+    other = remote_status()
+    if other.get("runner") not in (None, me) and not IDLE(other.get("state", "")) and time.time() - other.get("heartbeat", 0) < LEASE:
+        sys.exit(f"{P} is being made by runner {other['runner']} ({other['state']}); leaving it")
     status("starting", force=True)
+    time.sleep(20)  # two runners that claimed at the same moment: the last write wins, the other one leaves
+    if remote_status().get("runner") != me: sys.exit(f"{P} was claimed by another runner; leaving it")
+    def heartbeat():  # Kaggle batches block the main loop for an hour or more; keep the claim fresh meanwhile
+        while not stop.wait(120):
+            if cur[0]: status(cur[0], True, **cur[1])
+    threading.Thread(target=heartbeat, daemon=True).start()
 
     img_r, vid_r = Router(pv.IMAGE, log, a.min_quality), Router(pv.VIDEO, log, a.min_quality)
     mus_r = Router(pv.MUSIC, log)
@@ -137,13 +169,21 @@ def run(argv):
             for f in glob.glob(f"{D}/voice/a_*.wav"): os.remove(f)
             prov = pv.VOICE["edge"]
             with ThreadPoolExecutor(prov.limit) as ex: list(ex.map(lambda i: make(prov, i), range(n)))
-        # Whisper listens to every line; a line with skipped / garbled words is made again (2 more takes, best one kept)
-        from faster_whisper import WhisperModel
+        # Whisper listens to every line; a line with skipped / garbled words is made again (2 more takes, best one kept).
+        # Results are kept in voice_checks.json (with the line text, the file size and the voice), so a resumed run only
+        # listens to lines that are new or changed instead of the whole video again.
         from worker import wer
-        wm = WhisperModel("small.en", device="cpu", compute_type="int8", download_root=os.environ["WHISPER_DIR"], cpu_threads=os.cpu_count())
-        heard = lambda f: " ".join(x.text for x in wm.transcribe(f, vad_filter=False)[0])
-        checks = {}
-        for i in range(n):
+        ck_file = f"{D}/voice_checks.json"
+        try: cache = json.load(open(ck_file))
+        except Exception: cache = {}
+        sig = lambda i: [scenes[i]["text"], os.path.getsize(wav(i)), prov.name]
+        todo = [i for i in range(n) if (cache.get(str(i)) or [None])[1:] != sig(i)]
+        checks = {i: cache[str(i)][0] for i in range(n) if i not in todo}
+        if todo:
+            from faster_whisper import WhisperModel
+            wm = WhisperModel("small.en", device="cpu", compute_type="int8", download_root=os.environ["WHISPER_DIR"], cpu_threads=os.cpu_count())
+            heard = lambda f: " ".join(x.text for x in wm.transcribe(f, vad_filter=False)[0])
+        for i in todo:
             e = wer(scenes[i]["text"], heard(wav(i))); checks[i] = round(e, 2)
             for take, kw in enumerate(({"rate": "-4%"}, {"rate": "+3%"}) if prov.name == "edge" else ({}, {})):
                 if e <= 0.2: break
@@ -154,6 +194,8 @@ def run(argv):
                 if e2 < e: e = e2; os.remove(keep)
                 else: os.replace(keep, wav(i))
                 checks[i] = round(e, 2); log(f"retake {i}", prov.name, 0, f"wer {e:.2f}")
+            cache[str(i)] = [checks[i]] + sig(i)
+            json.dump(cache, open(ck_file, "w"))
         return {"provider": prov.name, "wer": checks, "bad_lines": {i: e for i, e in checks.items() if e > 0.2}}
 
     def do_music():
@@ -182,7 +224,8 @@ def run(argv):
         order = heroes + [i for i in range(n) if i not in heroes]          # hero images first: clips start sooner
         if a.images == "kaggle":  # two kernels: heroes (+ thumbnail) first, the rest alongside
             with ThreadPoolExecutor(2) as kx:
-                list(kx.map(lambda x: kaggle_images(*x), [(heroes, "vg-img-heroes", True), ([i for i in range(n) if i not in heroes], "vg-img-rest")]))
+                kb = kaggle_base(P)
+                list(kx.map(lambda x: kaggle_images(*x), [(heroes, f"{kb}-heroes", True), ([i for i in range(n) if i not in heroes], f"{kb}-rest")]))
         with ThreadPoolExecutor(img_r.threads()) as ex:  # Spaces / APIs: everything (or whatever Kaggle did not return)
             futs = [ex.submit(do_image, i) for i in order] + [ex.submit(do_thumb)]
             while not all(f.done() for f in futs):

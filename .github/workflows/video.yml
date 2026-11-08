@@ -1,7 +1,8 @@
 # Makes a video entirely in the cloud with free providers (code/free/run.py). Nothing runs on the laptop.
 #   gh workflow run video.yml -f project=<name> [-f args="--heroes 15 --voice edge"]
 # Every 6 hours it also resumes unfinished videos and adds motion clips when the free ZeroGPU quota is back.
-# Repo secrets: HF_TOKEN, KAGGLE_API_TOKEN (optional: GEMINI_API_KEY, CF_ACCOUNT_ID, CF_API_TOKEN). Repo variable: HF_REPO.
+# Repo secrets: HF_TOKEN, KAGGLE_API_TOKEN (optional: GEMINI_API_KEY, CF_ACCOUNT_ID, CF_API_TOKEN, MODAL_TOKEN_ID,
+# MODAL_TOKEN_SECRET, MUAPI_API_KEY). Repo variables: HF_REPO (optional: MODAL_MONTHLY_USD, MUAPI_MONTHLY_USD, MUAPI_MODEL).
 name: video
 on:
   workflow_dispatch:
@@ -10,7 +11,7 @@ on:
       args: {description: "extra arguments for run.py", required: false, default: ""}
   schedule:
     - cron: "23 */6 * * *"
-concurrency:
+concurrency:  # same-project runs are kept apart by the runner lease in code/free/run.py (cron and dispatch use different groups)
   group: video-${{ inputs.project || 'resume-all' }}
   cancel-in-progress: false
 jobs:
@@ -23,6 +24,12 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MUAPI_API_KEY: ${{ secrets.MUAPI_API_KEY }}
+      MODAL_MONTHLY_USD: ${{ vars.MODAL_MONTHLY_USD }}
+      MUAPI_MONTHLY_USD: ${{ vars.MUAPI_MONTHLY_USD }}
+      MUAPI_MODEL: ${{ vars.MUAPI_MODEL }}
       HF_REPO: ${{ vars.HF_REPO }}
       WHISPER_DIR: /home/runner/.cache/whisper
     steps:
