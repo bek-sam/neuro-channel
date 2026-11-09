@@ -131,7 +131,13 @@ def _run(argv, stop):
     mus_r = Router(pv.MUSIC, log)
     print("image:", [p.name for p in img_r.provs], "video:", [p.name for p in vid_r.provs], "voice:", a.voice, "heroes:", heroes)
     img = lambda i, s="": f"{D}/imgs/img_{i:03d}{s}.png"
-    clip_pool = ThreadPoolExecutor(vid_r.threads()); clip_futs = []
+    clip_pool = ThreadPoolExecutor(vid_r.threads()); clip_futs = []; clip_queued, clip_lock = set(), threading.Lock()
+
+    def queue_clip(i):  # the Kaggle batch and the image pass both offer each hero; render it once
+        with clip_lock:
+            if i in clip_queued: return
+            clip_queued.add(i)
+        clip_futs.append(clip_pool.submit(do_clip, i))
 
     def do_clip(i):
         out = f"{D}/clips/clip_{i:03d}.mp4"
@@ -145,7 +151,7 @@ def _run(argv, stop):
             if not os.path.exists(img(i, suf)):
                 tmp = img(i, suf) + ".part.png"
                 if img_r.run("image", f"img {i}{suf}", scenes[i]["prompt"], 1000 * i + c, tmp): os.replace(tmp, img(i, suf))
-            if c == 0 and i in heroes and os.path.exists(img(i)): clip_futs.append(clip_pool.submit(do_clip, i))
+            if c == 0 and i in heroes and os.path.exists(img(i)): queue_clip(i)
 
     def do_thumb():
         out = f"{D}/imgs/thumbnail.png"
@@ -216,7 +222,7 @@ def _run(argv, stop):
             from PIL import Image
             Image.open(f"{D}/imgs/thumbnail.png").convert("RGB").resize((1280, 720)).save(f"{D}/imgs/thumbnail.png")
         for i in idxs:
-            if i in heroes and os.path.exists(img(i)): clip_futs.append(clip_pool.submit(do_clip, i))
+            if i in heroes and os.path.exists(img(i)): queue_clip(i)
 
     status("making images, clips, voice and music", force=True)
     with ThreadPoolExecutor(3) as side:
