@@ -10,3 +10,4 @@ soundfile
 google-genai
 modal>=1.0
 httpx
+six  # kaggle 2.x imports it without declaring it

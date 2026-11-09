@@ -57,8 +57,9 @@ class Flux2Klein:  # black-forest-labs FLUX.2 [klein] 9B, 4 steps (non-commercia
     def available(self): return bool(HF())
     def image(self, prompt, seed, out):
         r = _call(self.space, "/generate", prompt=prompt, input_images=[], mode_choice="Distilled (4 steps)", seed=seed,
-                  randomize_seed=False, width=1920, height=1088, num_inference_steps=4, guidance_scale=1.0, prompt_upsampling=False)
-        shutil.copy(_file(r), out)
+                  randomize_seed=False, width=1024, height=576, num_inference_steps=4, guidance_scale=1.0, prompt_upsampling=False)
+        from PIL import Image  # the Space allows at most 1024 px a side; scale up to the 1920x1080 the edit expects
+        Image.open(_file(r)).convert("RGB").resize((1920, 1080), Image.LANCZOS).save(out)
 
 
 class WanSpace:  # Wan2.2-I2V-A14B fp8 + lightning LoRA, 6 steps, 832x480 @16 fps
@@ -253,7 +254,8 @@ class GeminiImage:  # needs GEMINI_API_KEY from a project WITHOUT billing (free 
         from google import genai
         from google.genai import types
         try:
-            r = genai.Client(api_key=os.environ["GEMINI_API_KEY"]).models.generate_content(model=self.MODEL, contents=prompt,
+            client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])  # keep a reference: a temporary client is closed mid-request
+            r = client.models.generate_content(model=self.MODEL, contents=prompt,
                 config=types.GenerateContentConfig(response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9"), seed=seed))
         except Exception as e:
             if any(k in str(e) for k in ("402", "429", "RESOURCE_EXHAUSTED")): raise QuotaError(f"gemini: {str(e)[:150]}")
